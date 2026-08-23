@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { saveAiSpot } from "@/lib/actions";
@@ -28,15 +28,33 @@ export function AiSpotGenerator({
 }) {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [message, setMessage] = useState("");
-  const [isPending, startTransition] = useTransition();
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const router = useRouter();
+
+  useEffect(() => {
+    if (!isGenerating) return;
+    const startedAt = Date.now();
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [isGenerating]);
 
   async function generate() {
     setMessage("");
+    setCandidates([]);
+    setElapsedSeconds(0);
+    setIsGenerating(true);
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 40000);
+
     try {
       const response = await fetch("/api/ai/spots", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
         body: JSON.stringify({
           city,
           country,
@@ -52,11 +70,25 @@ export function AiSpotGenerator({
         return;
       }
 
-      setCandidates(Array.isArray(data.spots) ? data.spots : []);
+      if (!Array.isArray(data.spots) || !data.spots.length) {
+        setMessage("AI returned no spot ideas. Please try again.");
+        return;
+      }
+
+      setCandidates(data.spots);
       if (data.notice) setMessage(data.notice);
     } catch (error) {
       setCandidates([]);
-      setMessage(error instanceof Error ? error.message : "AI spot generation failed.");
+      setMessage(
+        error instanceof DOMException && error.name === "AbortError"
+          ? "AI took longer than 40 seconds. Please try again."
+          : error instanceof Error
+            ? error.message
+            : "AI spot generation failed.",
+      );
+    } finally {
+      window.clearTimeout(timeout);
+      setIsGenerating(false);
     }
   }
 
@@ -71,15 +103,23 @@ export function AiSpotGenerator({
         </div>
         <button
           type="button"
-          onClick={() => startTransition(generate)}
-          disabled={isPending}
+          onClick={generate}
+          disabled={isGenerating}
+          aria-busy={isGenerating}
           className="inline-flex h-9 items-center gap-2 bg-zinc-950 px-3 text-xs font-medium text-white disabled:bg-zinc-400"
         >
           <Sparkles size={15} />
-          {isPending ? "Generating..." : "Generate"}
+          {isGenerating ? "Generating..." : "Generate"}
         </button>
       </div>
-      {message ? <p className="mt-3 text-xs text-amber-700">{message}</p> : null}
+      <div aria-live="polite">
+        {isGenerating ? (
+          <p className="mt-3 text-xs text-zinc-600">
+            Finding specific places for {city}... {elapsedSeconds}s
+          </p>
+        ) : null}
+        {message ? <p className="mt-3 text-xs text-amber-700">{message}</p> : null}
+      </div>
       <div className="mt-4 grid gap-2">
         {candidates.map((candidate) => (
           <form

@@ -61,7 +61,7 @@ function eachStayDate(arrivalDate: string, departureDate: string) {
   const cursor = new Date(`${arrivalDate}T00:00:00`);
   const end = new Date(`${departureDate}T00:00:00`);
 
-  while (cursor < end) {
+  while (cursor <= end) {
     dates.push(cursor.toISOString().slice(0, 10));
     cursor.setDate(cursor.getDate() + 1);
   }
@@ -146,12 +146,14 @@ async function ensureDayPlans(
 
   if (!rows.length) return;
 
-  await supabase.from("day_plans").upsert(rows, {
+  const { error: dayPlanUpsertError } = await supabase.from("day_plans").upsert(rows, {
     onConflict: "city_stop_id,plan_date",
     ignoreDuplicates: true,
   });
 
-  const { data: dayPlans } = await supabase
+  if (dayPlanUpsertError) throw new Error(dayPlanUpsertError.message);
+
+  const { data: dayPlans, error: dayPlansError } = await supabase
     .from("day_plans")
     .select("id")
     .eq("city_stop_id", cityStopId)
@@ -159,6 +161,8 @@ async function ensureDayPlans(
       "plan_date",
       rows.map((row) => row.plan_date),
     );
+
+  if (dayPlansError) throw new Error(dayPlansError.message);
 
   await ensureMealAnchorsForDayPlans(
     supabase,
@@ -216,6 +220,7 @@ export async function createTrip(formData: FormData) {
 
 export async function addCityStop(formData: FormData) {
   const { supabase } = await requireUser();
+  const cityStopId = z.string().uuid().parse(formData.get("submission_id"));
   const tripId = z.string().uuid().parse(formData.get("trip_id"));
   const nights = z.coerce.number().int().min(1).parse(formData.get("nights"));
   const requestedArrival = String(formData.get("arrival_date") || "");
@@ -249,11 +254,26 @@ export async function addCityStop(formData: FormData) {
   const { data: cityStop, error } = await supabase
     .from("city_stops")
     .insert({
+      id: cityStopId,
       ...parsed,
       order_index: (previousStop?.order_index ?? -1) + 1,
     })
     .select("id, order_index, city, arrival_date, departure_date")
     .single();
+
+  if (error?.code === "23505") {
+    const { data: existingStop } = await supabase
+      .from("city_stops")
+      .select("id")
+      .eq("id", cityStopId)
+      .eq("trip_id", parsed.trip_id)
+      .maybeSingle();
+
+    if (existingStop) {
+      revalidatePath(`/trip/${parsed.trip_id}`);
+      return;
+    }
+  }
 
   if (error) throw new Error(error.message);
   await Promise.all([

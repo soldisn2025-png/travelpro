@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { randomUUID } from "node:crypto";
 import { notFound } from "next/navigation";
 import { Copy, ExternalLink, Plane, Plus, Trash2 } from "lucide-react";
 import {
@@ -92,6 +93,7 @@ export default async function TripPage({
               <h2 className="text-sm font-semibold text-zinc-950">Add city stop</h2>
               <form action={addCityStop} className="mt-4 grid gap-3">
                 <input type="hidden" name="trip_id" value={bundle.id} />
+                <input type="hidden" name="submission_id" value={randomUUID()} />
                 <input name="city" required placeholder="Barcelona" className="h-10 border border-zinc-200 px-3 text-sm" />
                 <div className="grid gap-3 sm:grid-cols-2">
                   <label className="grid gap-1 text-xs font-medium text-zinc-500">
@@ -329,6 +331,8 @@ export default async function TripPage({
                         dayPlans={dayPlans}
                         verifiedSpots={unscheduledVerified}
                         city={stop.city}
+                        arrivalDate={stop.arrival_date}
+                        departureDate={stop.departure_date}
                       />
                     ) : (
                       <p className="border border-zinc-100 bg-zinc-50 p-4 text-sm text-zinc-500">

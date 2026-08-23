@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { createClient } from "@/lib/supabase/server";
 
 const requestSchema = z.object({
   city: z.string().min(2),
@@ -7,6 +8,47 @@ const requestSchema = z.object({
   planningMode: z.enum(["easygoing", "normal", "fast_walker"]),
   desiredCount: z.number().int().min(3).max(12).default(8),
 });
+
+const candidateSchema = z.object({
+  name: z.string().min(2),
+  category: z.string().min(2),
+  duration_minutes: z.number().int().min(15).max(480),
+  indoor_outdoor: z.string().min(3),
+  rationale: z.string().min(5),
+});
+
+const resultSchema = z.object({
+  spots: z.array(candidateSchema).min(1).max(12),
+});
+
+const outputSchema: Record<string, unknown> = {
+  type: "object",
+  properties: {
+    spots: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          category: { type: "string" },
+          duration_minutes: { type: "integer" },
+          indoor_outdoor: { type: "string" },
+          rationale: { type: "string" },
+        },
+        required: [
+          "name",
+          "category",
+          "duration_minutes",
+          "indoor_outdoor",
+          "rationale",
+        ],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ["spots"],
+  additionalProperties: false,
+};
 
 const fallbackSpots = [
   {
@@ -33,6 +75,15 @@ const fallbackSpots = [
 ];
 
 export async function POST(request: Request) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return Response.json({ error: "Please sign in again." }, { status: 401 });
+  }
+
   const body = requestSchema.parse(await request.json());
 
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -51,11 +102,18 @@ export async function POST(request: Request) {
 
     const response = await anthropic.messages.create({
       model,
-      max_tokens: 1600,
+      max_tokens: 2400,
+      thinking: { type: "disabled" },
+      output_config: {
+        format: {
+          type: "json_schema",
+          schema: outputSchema,
+        },
+      },
       messages: [
         {
           role: "user",
-          content: `Return only JSON. Suggest ${body.desiredCount} travel spots for ${body.city}, ${body.country ?? ""}.
+          content: `Suggest ${body.desiredCount} travel spots for ${body.city}, ${body.country ?? ""}.
 Planning mode: ${body.planningMode}.
 Each spot must have name, category, duration_minutes, indoor_outdoor, rationale.
 Prefer specific places that can be verified in Google Places later. Do not invent addresses.`,
@@ -68,23 +126,42 @@ Prefer specific places that can be verified in Google Places later. Do not inven
       .map((block) => block.text)
       .join("\n")
       .trim();
-    const jsonText = text.match(/\[[\s\S]*\]|\{[\s\S]*\}/)?.[0] ?? text;
-    const parsed = JSON.parse(jsonText) as unknown;
-    const spots = Array.isArray(parsed)
-      ? parsed
-      : typeof parsed === "object" && parsed && "spots" in parsed
-        ? (parsed as { spots: unknown }).spots
-        : [];
+    if (response.stop_reason === "max_tokens") {
+      throw new Error("AI response reached its output limit. Please try again.");
+    }
 
-    return Response.json({ spots });
+    if (!text) {
+      throw new Error("AI returned no spot ideas. Please try again.");
+    }
+
+    const parsed = resultSchema.parse(JSON.parse(text));
+
+    return Response.json({ spots: parsed.spots });
   } catch (error) {
+    const apiError = error as {
+      name?: string;
+      message?: string;
+      status?: number;
+      request_id?: string;
+    };
+    console.error("AI spot generation failed", {
+      name: apiError.name,
+      message: apiError.message,
+      status: apiError.status,
+      requestId: apiError.request_id,
+    });
+
+    const message =
+      apiError.status === 401
+        ? "The Anthropic API key was rejected. Update it in Vercel."
+        : apiError.status === 429
+          ? "Anthropic is temporarily rate-limited. Please try again shortly."
+          : apiError.message?.startsWith("AI ")
+            ? apiError.message
+            : "AI spot generation failed. Please try again.";
+
     return Response.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "AI spot generation failed.",
-      },
+      { error: message },
       { status: 502 },
     );
   }
