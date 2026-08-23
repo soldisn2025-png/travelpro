@@ -129,7 +129,9 @@ export default async function SharePage({
                                     ? "Fixed"
                                     : `${item.duration_minutes} min`}
                                   {item.travel_time_from_previous_minutes
-                                    ? ` · ${item.travel_time_from_previous_minutes} min travel`
+                                    ? item.travel_time_is_estimated
+                                      ? ` · ~${item.travel_time_from_previous_minutes} min travel (estimated)`
+                                      : ` · ${item.travel_time_from_previous_minutes} min travel`
                                     : ""}
                                 </p>
                               </div>

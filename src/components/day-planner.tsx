@@ -36,7 +36,6 @@ function isMealItem(item: DayItem) {
 }
 
 function getDisplayConflict(item: DayItem) {
-  if (item.conflict_reason?.includes("appears closed on this day")) return null;
   return item.conflict_reason;
 }
 
@@ -120,10 +119,14 @@ export function DayPlanner({
   dayPlans,
   verifiedSpots,
   city,
+  arrivalDate,
+  departureDate,
 }: {
   dayPlans: Array<DayPlan & { day_items: DayItem[] }>;
   verifiedSpots: Spot[];
   city: string;
+  arrivalDate: string | null;
+  departureDate: string | null;
 }) {
   const sensors = useSensors(useSensor(PointerSensor));
   const [message, setMessage] = useState("");
@@ -180,11 +183,10 @@ export function DayPlanner({
       body: JSON.stringify({ dayPlanId, mode: "optimize" }),
     });
     const data = await response.json();
-    setMessage(
-      data.ok
-        ? data.warning || "Day auto-planned."
-        : data.conflict ?? "Could not schedule day.",
-    );
+    const summary = data.ok
+      ? data.warning || "Day auto-planned."
+      : data.conflict ?? "Could not schedule day.";
+    setMessage([summary, data.travelWarning].filter(Boolean).join(" "));
     router.refresh();
   }
 
@@ -262,6 +264,15 @@ export function DayPlanner({
                     <h3 className="text-sm font-semibold text-zinc-950">
                       {formatDate(plan.plan_date)}
                     </h3>
+                    {plan.plan_date === arrivalDate || plan.plan_date === departureDate ? (
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {plan.plan_date === arrivalDate ? "Arrival day" : ""}
+                        {plan.plan_date === arrivalDate && plan.plan_date === departureDate
+                          ? " and "
+                          : ""}
+                        {plan.plan_date === departureDate ? "Departure day" : ""}
+                      </p>
+                    ) : null}
                   </div>
                   <form
                     action={updateDayPlanTimes}
@@ -366,7 +377,9 @@ export function DayPlanner({
                               : "Fixed anchor"
                             : `${item.duration_minutes} min`}
                           {item.travel_time_from_previous_minutes
-                            ? ` · ${item.travel_time_from_previous_minutes} min from prior`
+                            ? item.travel_time_is_estimated
+                              ? ` · ~${item.travel_time_from_previous_minutes} min from prior (estimated)`
+                              : ` · ${item.travel_time_from_previous_minutes} min from prior`
                             : ""}
                         </p>
                         {item.item_type === "spot" ? (

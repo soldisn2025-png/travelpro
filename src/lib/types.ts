@@ -79,6 +79,7 @@ export type DayItem = {
   duration_minutes: number;
   sort_order: number;
   travel_time_from_previous_minutes: number | null;
+  travel_time_is_estimated: boolean;
   conflict_reason: string | null;
   schedule_mode: ScheduleMode;
   priority: DayItemPriority;
