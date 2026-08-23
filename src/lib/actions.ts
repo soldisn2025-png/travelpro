@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { addDays, minutesToTime, timeToMinutes } from "@/lib/dates";
+import { addDays, dateRange, minutesToTime, timeToMinutes } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 
 const tripSchema = z.object({
@@ -57,16 +57,7 @@ async function requireUser() {
 
 function eachStayDate(arrivalDate: string, departureDate: string) {
   if (!arrivalDate || !departureDate) return [];
-  const dates: string[] = [];
-  const cursor = new Date(`${arrivalDate}T00:00:00`);
-  const end = new Date(`${departureDate}T00:00:00`);
-
-  while (cursor <= end) {
-    dates.push(cursor.toISOString().slice(0, 10));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-
-  return dates;
+  return dateRange(arrivalDate, departureDate);
 }
 
 async function ensureMealAnchorsForDayPlans(
@@ -382,6 +373,14 @@ export async function saveAiSpot(formData: FormData) {
   revalidatePath("/trip");
 }
 
+function parseOpeningHours(value: FormDataEntryValue | null) {
+  try {
+    return JSON.parse(String(value || "{}")) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
 export async function verifySpot(formData: FormData) {
   const { supabase } = await requireUser();
   const spotId = z.string().uuid().parse(formData.get("spot_id"));
@@ -394,7 +393,7 @@ export async function verifySpot(formData: FormData) {
       address: String(formData.get("address")),
       latitude: Number(formData.get("latitude")),
       longitude: Number(formData.get("longitude")),
-      opening_hours: JSON.parse(String(formData.get("opening_hours") || "{}")),
+      opening_hours: parseOpeningHours(formData.get("opening_hours")),
       verification_status: "verified",
     })
     .eq("id", spotId);

@@ -1,21 +1,30 @@
 const dayMs = 24 * 60 * 60 * 1000;
 
+// Calendar dates are anchored to UTC midnight. Building them from local
+// midnight and reading them back with toISOString() shifts the date by a day
+// for anyone east of UTC, which is most of where this app gets used.
+function toUtcMs(date: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  return Date.UTC(year, month - 1, day);
+}
+
+function fromUtcMs(ms: number) {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
 export function dateRange(startDate: string, endDate: string) {
   const dates: string[] = [];
-  const start = new Date(`${startDate}T00:00:00`);
-  const end = new Date(`${endDate}T00:00:00`);
+  const end = toUtcMs(endDate);
 
-  for (let time = start.getTime(); time <= end.getTime(); time += dayMs) {
-    dates.push(new Date(time).toISOString().slice(0, 10));
+  for (let time = toUtcMs(startDate); time <= end; time += dayMs) {
+    dates.push(fromUtcMs(time));
   }
 
   return dates;
 }
 
 export function addDays(date: string, days: number) {
-  const value = new Date(`${date}T00:00:00`);
-  value.setDate(value.getDate() + days);
-  return value.toISOString().slice(0, 10);
+  return fromUtcMs(toUtcMs(date) + days * dayMs);
 }
 
 export function minutesToTime(minutes: number) {

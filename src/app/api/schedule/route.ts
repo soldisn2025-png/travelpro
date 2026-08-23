@@ -1,7 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { readJson, requireApiUser } from "@/lib/api";
 import { formatDate, minutesToTime, timeToMinutes } from "@/lib/dates";
-import { createClient } from "@/lib/supabase/server";
 import type { DayItem, DayPlan, Spot } from "@/lib/types";
 
 const schema = z.object({
@@ -575,8 +575,15 @@ function chooseOptimizedOrder({
 }
 
 export async function POST(request: Request) {
-  const { dayPlanId, mode } = schema.parse(await request.json());
-  const supabase = await createClient();
+  const auth = await requireApiUser();
+  if (!auth.ok) return auth.response;
+
+  const parsed = await readJson(request, schema);
+  if (!parsed.ok) return parsed.response;
+
+  const { dayPlanId, mode } = parsed.data;
+  // RLS scopes every read and write below to trips this user owns.
+  const { supabase } = auth;
 
   const { data: plan, error: planError } = await supabase
     .from("day_plans")

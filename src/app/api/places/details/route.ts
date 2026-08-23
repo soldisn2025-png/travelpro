@@ -1,11 +1,18 @@
 import { z } from "zod";
+import { readJson, requireApiUser } from "@/lib/api";
 
 const schema = z.object({
   placeId: z.string().min(4),
 });
 
 export async function POST(request: Request) {
-  const { placeId } = schema.parse(await request.json());
+  const auth = await requireApiUser();
+  if (!auth.ok) return auth.response;
+
+  const parsed = await readJson(request, schema);
+  if (!parsed.ok) return parsed.response;
+
+  const { placeId } = parsed.data;
   const key = process.env.GOOGLE_MAPS_API_KEY;
 
   if (!key) {

@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { readJson, requireApiUser } from "@/lib/api";
 
 const requestSchema = z.object({
   city: z.string().min(2),
@@ -75,16 +75,13 @@ const fallbackSpots = [
 ];
 
 export async function POST(request: Request) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const auth = await requireApiUser();
+  if (!auth.ok) return auth.response;
 
-  if (!user) {
-    return Response.json({ error: "Please sign in again." }, { status: 401 });
-  }
+  const parsed = await readJson(request, requestSchema);
+  if (!parsed.ok) return parsed.response;
 
-  const body = requestSchema.parse(await request.json());
+  const body = parsed.data;
 
   if (!process.env.ANTHROPIC_API_KEY) {
     return Response.json({
