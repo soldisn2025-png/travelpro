@@ -39,28 +39,77 @@ function getDisplayConflict(item: DayItem) {
   return item.conflict_reason;
 }
 
-function DraggableSpot({ spot }: { spot: Spot }) {
+// Dragging is unreliable once a city has several days, because the later day
+// columns sit far below the spot list. The picker is the primary path; the drag
+// handle stays for anyone who prefers it.
+function DraggableSpot({
+  spot,
+  dayPlans,
+  onAdded,
+}: {
+  spot: Spot;
+  dayPlans: Array<DayPlan & { day_items: DayItem[] }>;
+  onAdded: () => void;
+}) {
   const { attributes, listeners, setNodeRef, transform } = useDraggable({
     id: `spot:${spot.id}`,
     data: { type: "spot", spot },
   });
 
   return (
-    <button
-      ref={setNodeRef}
-      type="button"
-      style={{
-        transform: transform
-          ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
-          : undefined,
-      }}
-      className="w-full border border-zinc-200 bg-white p-2 text-left text-xs shadow-sm"
-      {...listeners}
-      {...attributes}
-    >
-      <span className="block font-medium text-zinc-950">{spot.name}</span>
-      <span className="mt-1 block text-zinc-500">{spot.duration_minutes} min</span>
-    </button>
+    <div className="border border-zinc-200 bg-white shadow-sm">
+      <button
+        ref={setNodeRef}
+        type="button"
+        style={{
+          transform: transform
+            ? `translate3d(${transform.x}px, ${transform.y}px, 0)`
+            : undefined,
+        }}
+        className="w-full cursor-grab p-2 text-left text-xs active:cursor-grabbing"
+        {...listeners}
+        {...attributes}
+      >
+        <span className="block font-medium text-zinc-950">{spot.name}</span>
+        <span className="mt-1 block text-zinc-500">{spot.duration_minutes} min</span>
+      </button>
+      {dayPlans.length ? (
+        <form
+          onPointerDown={stopDragActivation}
+          action={async (formData) => {
+            await addSpotToDay(formData);
+            onAdded();
+          }}
+          className="flex items-center gap-1 border-t border-zinc-100 p-1"
+        >
+          <input type="hidden" name="spot_id" value={spot.id} />
+          <input type="hidden" name="title" value={spot.name} />
+          <input
+            type="hidden"
+            name="duration_minutes"
+            value={spot.duration_minutes}
+          />
+          <select
+            name="day_plan_id"
+            defaultValue={dayPlans[0]?.id}
+            aria-label={`Choose a day for ${spot.name}`}
+            className="h-7 min-w-0 flex-1 border border-zinc-200 bg-white px-1 text-xs"
+          >
+            {dayPlans.map((plan) => (
+              <option key={plan.id} value={plan.id}>
+                {formatDate(plan.plan_date)}
+              </option>
+            ))}
+          </select>
+          <SubmitButton
+            pendingText="..."
+            className="h-7 shrink-0 border border-zinc-200 bg-white px-2 text-xs font-medium disabled:text-zinc-400"
+          >
+            Add
+          </SubmitButton>
+        </form>
+      ) : null}
+    </div>
   );
 }
 
@@ -228,7 +277,12 @@ export function DayPlanner({
           </p>
           <div className="grid gap-2">
             {verifiedSpots.map((spot) => (
-              <DraggableSpot key={spot.id} spot={spot} />
+              <DraggableSpot
+                key={spot.id}
+                spot={spot}
+                dayPlans={dayPlans}
+                onAdded={() => router.refresh()}
+              />
             ))}
             {!verifiedSpots.length ? (
               <p className="text-xs leading-5 text-zinc-500">
@@ -333,17 +387,23 @@ export function DayPlanner({
                   <input type="hidden" name="day_plan_id" value={plan.id} />
                   <input
                     name="title"
+                    required
+                    minLength={2}
                     placeholder="Fixed anchor"
                     className="h-9 border border-zinc-200 px-2 text-sm"
                   />
                   <input
                     name="start_time"
                     type="time"
+                    required
+                    defaultValue="09:00"
                     className="h-9 border border-zinc-200 px-2 text-sm"
                   />
                   <input
                     name="end_time"
                     type="time"
+                    required
+                    defaultValue="10:00"
                     className="h-9 border border-zinc-200 px-2 text-sm"
                   />
                   <SubmitButton pendingText="Adding..." className="inline-flex h-9 items-center justify-center gap-1 border border-zinc-200 bg-white px-2 text-xs font-medium disabled:text-zinc-400">

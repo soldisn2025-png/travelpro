@@ -286,7 +286,7 @@ export default async function TripPage({
                     <input type="hidden" name="trip_id" value={bundle.id} />
                     <input type="hidden" name="city_stop_id" value={stop.id} />
                     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                      <input name="city" defaultValue={stop.city} className="h-9 border border-zinc-200 px-2 text-sm" />
+                      <input name="city" required minLength={2} defaultValue={stop.city} className="h-9 border border-zinc-200 px-2 text-sm" />
                       <input type="hidden" name="country" value="" />
                       <input name="nights" type="number" min={1} defaultValue={stop.nights} className="h-9 border border-zinc-200 px-2 text-sm" />
                       <input name="arrival_date" type="date" defaultValue={stop.arrival_date ?? ""} className="h-9 border border-zinc-200 px-2 text-sm" />
@@ -337,8 +337,25 @@ export default async function TripPage({
                       <h3 className="text-sm font-semibold text-zinc-950">Add manual spot</h3>
                       <form action={addManualSpot} className="mt-3 grid gap-2 sm:grid-cols-2">
                         <input type="hidden" name="city_stop_id" value={stop.id} />
-                        <input name="name" placeholder="Spot name" className="h-9 border border-zinc-200 px-2 text-sm" />
-                        <input name="category" placeholder="Category" className="h-9 border border-zinc-200 px-2 text-sm" />
+                        <input
+                          name="name"
+                          required
+                          minLength={2}
+                          placeholder="Spot name"
+                          className="h-9 border border-zinc-200 px-2 text-sm"
+                        />
+                        <select
+                          name="category"
+                          defaultValue="sight"
+                          className="h-9 border border-zinc-200 px-2 text-sm"
+                        >
+                          <option value="sight">Sight</option>
+                          <option value="museum">Museum</option>
+                          <option value="food">Food</option>
+                          <option value="outdoor">Outdoor</option>
+                          <option value="shopping">Shopping</option>
+                          <option value="other">Other</option>
+                        </select>
                         <input name="duration_minutes" type="number" min={15} defaultValue={90} className="h-9 border border-zinc-200 px-2 text-sm" />
                         <select name="indoor_outdoor" defaultValue="indoor" className="h-9 border border-zinc-200 px-2 text-sm">
                           <option value="indoor">Indoor</option>

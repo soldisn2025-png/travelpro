@@ -13,6 +13,9 @@ const tripSchema = z.object({
   end_date: z.string().min(10),
   planning_mode: z.enum(["easygoing", "normal", "fast_walker"]),
   travel_mode: z.enum(["walk", "transit", "drive"]),
+}).refine((trip) => trip.end_date >= trip.start_date, {
+  message: "The end date cannot be before the start date.",
+  path: ["end_date"],
 });
 
 const cityStopSchema = z.object({
@@ -529,6 +532,14 @@ export async function createDayPlan(formData: FormData) {
     .insert(parsed)
     .select("id")
     .single();
+
+  // The date defaults to the arrival date, which always has a plan already, so
+  // a duplicate here is the normal case rather than an error. Treat it as a
+  // no-op instead of crashing the page.
+  if (error?.code === "23505") {
+    revalidatePath("/trip");
+    return;
+  }
 
   if (error) throw new Error(error.message);
   await ensureMealAnchorsForDayPlan(supabase, dayPlan.id);
