@@ -1,8 +1,9 @@
 import { revalidatePath } from "next/cache";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { readJson, requireApiUser } from "@/lib/api";
 import { formatDate, minutesToTime, timeToMinutes } from "@/lib/dates";
-import type { DayItem, DayPlan, Spot } from "@/lib/types";
+import type { DayItem, DayPlan, Spot, TravelMode } from "@/lib/types";
 
 const schema = z.object({
   dayPlanId: z.string().uuid(),
@@ -128,6 +129,18 @@ function chunk<T>(items: T[], size: number) {
 // first stop is costed like any other leg.
 const HOTEL_NODE_ID = "hotel";
 
+const ROUTES_TRAVEL_MODE: Record<TravelMode, string> = {
+  walk: "WALK",
+  transit: "TRANSIT",
+  drive: "DRIVE",
+};
+
+// Only TRANSIT is capped at 100 elements; the others allow far more, but one
+// conservative chunk size keeps the request shape identical across modes.
+const MATRIX_CHUNK_SIZE = 10;
+
+const MATRIX_CACHE_DAYS = 7;
+
 type MatrixNode = { id: string; latitude: number | null; longitude: number | null };
 
 function toWaypoint(node: MatrixNode) {
@@ -175,25 +188,37 @@ function toDepartureTime(planDate: string, startTime: string, offsetSeconds: num
   return new Date(utcMs).toISOString();
 }
 
-async function getTravelMatrix(nodes: MatrixNode[], plan: DayPlan) {
-  const key = process.env.GOOGLE_MAPS_API_KEY;
-  const usable = nodes.filter(
-    (node) => node.latitude !== null && node.longitude !== null,
-  );
+function buildCacheKey(
+  nodes: MatrixNode[],
+  travelMode: TravelMode,
+  departureTime: string | null,
+) {
+  // Coordinates rather than ids, so moving a hotel or re-verifying a spot
+  // produces a different key rather than a stale hit.
+  const points = nodes
+    .map((node) => `${node.latitude?.toFixed(5)},${node.longitude?.toFixed(5)}`)
+    .sort()
+    .join("|");
 
-  if (!key) return { matrix: {} as Matrix, error: "GOOGLE_MAPS_API_KEY is missing." };
-  if (usable.length < 2) return { matrix: {} as Matrix, error: null };
+  return `${travelMode}:${departureTime ?? "no-departure"}:${points}`;
+}
 
-  const offsetSeconds = await getUtcOffsetSeconds(usable[0], plan.plan_date, key);
-  const departureTime =
-    offsetSeconds === null
-      ? null
-      : toDepartureTime(plan.plan_date, plan.start_time, offsetSeconds);
+type MatrixResult = { matrix: Matrix; error: string | null };
 
+async function fetchTravelMatrix({
+  usable,
+  key,
+  travelMode,
+  departureTime,
+}: {
+  usable: MatrixNode[];
+  key: string;
+  travelMode: TravelMode;
+  departureTime: string | null;
+}): Promise<MatrixResult> {
   const matrix: Matrix = {};
   const errors: string[] = [];
-  // Transit matrices are capped at 100 elements per request.
-  const groups = chunk(usable, 10);
+  const groups = chunk(usable, MATRIX_CHUNK_SIZE);
 
   for (const origins of groups) {
     for (const destinations of groups) {
@@ -211,8 +236,12 @@ async function getTravelMatrix(nodes: MatrixNode[], plan: DayPlan) {
             body: JSON.stringify({
               origins: origins.map(toWaypoint),
               destinations: destinations.map(toWaypoint),
-              travelMode: "TRANSIT",
-              ...(departureTime ? { departureTime } : {}),
+              travelMode: ROUTES_TRAVEL_MODE[travelMode],
+              // departureTime is only meaningful where schedules or traffic
+              // matter; WALK routes are the same at any hour.
+              ...(departureTime && travelMode !== "walk"
+                ? { departureTime }
+                : {}),
             }),
           },
         );
@@ -252,11 +281,68 @@ async function getTravelMatrix(nodes: MatrixNode[], plan: DayPlan) {
 
   const error = errors.length
     ? `Google could not return travel times (${errors[0].slice(0, 160)}).`
-    : departureTime === null
+    : departureTime === null && travelMode !== "walk"
       ? "Travel times are not date-accurate because the trip date or city timezone could not be resolved."
       : null;
 
   return { matrix, error };
+}
+
+// Reads a cached matrix before calling Google, so repeatedly pressing
+// "Auto-plan day" does not re-bill the Routes API for the same journeys.
+async function getTravelMatrix({
+  supabase,
+  nodes,
+  plan,
+  travelMode,
+}: {
+  supabase: SupabaseClient;
+  nodes: MatrixNode[];
+  plan: DayPlan;
+  travelMode: TravelMode;
+}): Promise<MatrixResult> {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  const usable = nodes.filter(
+    (node) => node.latitude !== null && node.longitude !== null,
+  );
+
+  if (!key) return { matrix: {}, error: "GOOGLE_MAPS_API_KEY is missing." };
+  if (usable.length < 2) return { matrix: {}, error: null };
+
+  const offsetSeconds = await getUtcOffsetSeconds(usable[0], plan.plan_date, key);
+  const departureTime =
+    offsetSeconds === null
+      ? null
+      : toDepartureTime(plan.plan_date, plan.start_time, offsetSeconds);
+  const cacheKey = buildCacheKey(usable, travelMode, departureTime);
+  const freshAfter = new Date(
+    Date.now() - MATRIX_CACHE_DAYS * 24 * 60 * 60 * 1000,
+  ).toISOString();
+
+  const { data: cached } = await supabase
+    .from("travel_matrices")
+    .select("matrix")
+    .eq("cache_key", cacheKey)
+    .gte("created_at", freshAfter)
+    .maybeSingle();
+
+  if (cached?.matrix) {
+    return { matrix: cached.matrix as Matrix, error: null };
+  }
+
+  const result = await fetchTravelMatrix({ usable, key, travelMode, departureTime });
+
+  // Only cache a clean result; a partial matrix would pin bad data for a week.
+  if (!result.error && Object.keys(result.matrix).length) {
+    await supabase
+      .from("travel_matrices")
+      .upsert(
+        { cache_key: cacheKey, matrix: result.matrix, created_at: new Date().toISOString() },
+        { onConflict: "cache_key" },
+      );
+  }
+
+  return result;
 }
 
 function lookupTravel(matrix: Matrix, fromSpotId: string | null, toSpotId: string) {
@@ -714,9 +800,19 @@ export async function POST(request: Request) {
   // The hotel anchors the first leg of the day, so it joins the travel matrix.
   const { data: cityStop } = await supabase
     .from("city_stops")
-    .select("hotel_name, hotel_latitude, hotel_longitude")
+    .select("trip_id, hotel_name, hotel_latitude, hotel_longitude")
     .eq("id", (plan as DayPlan).city_stop_id)
     .single();
+
+  const { data: trip } = cityStop?.trip_id
+    ? await supabase
+        .from("trips")
+        .select("travel_mode")
+        .eq("id", cityStop.trip_id)
+        .single()
+    : { data: null };
+
+  const travelMode = (trip?.travel_mode ?? "transit") as TravelMode;
 
   const hotel =
     cityStop?.hotel_latitude !== null && cityStop?.hotel_latitude !== undefined
@@ -728,10 +824,12 @@ export async function POST(request: Request) {
         }
       : null;
 
-  const { matrix, error: matrixError } = await getTravelMatrix(
-    hotel ? [...Object.values(spots), hotel] : Object.values(spots),
-    plan as DayPlan,
-  );
+  const { matrix, error: matrixError } = await getTravelMatrix({
+    supabase,
+    nodes: hotel ? [...Object.values(spots), hotel] : Object.values(spots),
+    plan: plan as DayPlan,
+    travelMode,
+  });
   const fixedItems = allItems.filter(
     (item) =>
       item.schedule_mode === "pinned" ||

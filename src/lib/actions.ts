@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { addDays, dateRange, minutesToTime, timeToMinutes } from "@/lib/dates";
+import { fetchPlaceDetails } from "@/lib/places";
 import { createClient } from "@/lib/supabase/server";
 
 const tripSchema = z.object({
@@ -11,6 +12,7 @@ const tripSchema = z.object({
   start_date: z.string().min(10),
   end_date: z.string().min(10),
   planning_mode: z.enum(["easygoing", "normal", "fast_walker"]),
+  travel_mode: z.enum(["walk", "transit", "drive"]),
 });
 
 const cityStopSchema = z.object({
@@ -209,6 +211,22 @@ export async function createTrip(formData: FormData) {
   redirect(`/trip/${data.id}`);
 }
 
+export async function updateTripTravelMode(formData: FormData) {
+  const { supabase } = await requireUser();
+  const tripId = z.string().uuid().parse(formData.get("trip_id"));
+  const travelMode = z
+    .enum(["walk", "transit", "drive"])
+    .parse(formData.get("travel_mode"));
+
+  const { error } = await supabase
+    .from("trips")
+    .update({ travel_mode: travelMode })
+    .eq("id", tripId);
+
+  if (error) throw new Error(error.message);
+  revalidatePath(`/trip/${tripId}`);
+}
+
 export async function addCityStop(formData: FormData) {
   const { supabase } = await requireUser();
   const cityStopId = z.string().uuid().parse(formData.get("submission_id"));
@@ -394,6 +412,7 @@ export async function verifySpot(formData: FormData) {
       latitude: Number(formData.get("latitude")),
       longitude: Number(formData.get("longitude")),
       opening_hours: parseOpeningHours(formData.get("opening_hours")),
+      hours_verified_at: new Date().toISOString(),
       verification_status: "verified",
     })
     .eq("id", spotId);
@@ -439,6 +458,43 @@ export async function clearHotel(formData: FormData) {
     .eq("id", cityStopId);
 
   if (error) throw new Error(error.message);
+  revalidatePath(`/trip/${tripId}`);
+}
+
+// Refreshes every verified spot in one city stop, because hours go stale as a
+// group when a trip is planned months ahead and seasonal schedules change.
+export async function refreshStopHours(formData: FormData) {
+  const { supabase } = await requireUser();
+  const cityStopId = z.string().uuid().parse(formData.get("city_stop_id"));
+  const tripId = z.string().uuid().parse(formData.get("trip_id"));
+
+  const { data: spots, error } = await supabase
+    .from("spots")
+    .select("id, google_place_id")
+    .eq("city_stop_id", cityStopId)
+    .eq("verification_status", "verified")
+    .not("google_place_id", "is", null);
+
+  if (error) throw new Error(error.message);
+
+  for (const spot of spots ?? []) {
+    if (!spot.google_place_id) continue;
+
+    const result = await fetchPlaceDetails(spot.google_place_id);
+    // Skip failures rather than aborting; one dead place id should not stop
+    // the rest of the city from refreshing.
+    if (!result.ok) continue;
+
+    await supabase
+      .from("spots")
+      .update({
+        opening_hours: result.place.openingHours,
+        address: result.place.address || undefined,
+        hours_verified_at: new Date().toISOString(),
+      })
+      .eq("id", spot.id);
+  }
+
   revalidatePath(`/trip/${tripId}`);
 }
 

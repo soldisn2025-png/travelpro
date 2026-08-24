@@ -7,8 +7,10 @@ import {
   addManualSpot,
   createDayPlan,
   deleteSpot,
+  refreshStopHours,
   updateCityStop,
   updateTravelLeg,
+  updateTripTravelMode,
 } from "@/lib/actions";
 import { dateRange, formatDate } from "@/lib/dates";
 import { getSiteUrl, hasSupabaseEnv } from "@/lib/env";
@@ -22,6 +24,8 @@ import { SubmitButton } from "@/components/submit-button";
 import type { DayItem, DayPlan, Spot, TripBundle } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+
+const STALE_HOURS_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
 
 export default async function TripPage({
   params,
@@ -91,7 +95,34 @@ export default async function TripPage({
               </Link>
             </div>
           </div>
-          <div className="mt-4 flex items-center gap-2 border border-zinc-100 bg-zinc-50 p-3 text-xs text-zinc-500">
+          <form
+            action={updateTripTravelMode}
+            className="mt-4 flex flex-wrap items-center gap-2 border border-zinc-100 bg-zinc-50 p-3"
+          >
+            <input type="hidden" name="trip_id" value={bundle.id} />
+            <label className="text-xs font-medium text-zinc-600">
+              How you get around
+            </label>
+            <select
+              name="travel_mode"
+              defaultValue={bundle.travel_mode ?? "transit"}
+              className="h-8 border border-zinc-200 bg-white px-2 text-xs"
+            >
+              <option value="walk">Mostly walking</option>
+              <option value="transit">Public transit</option>
+              <option value="drive">Driving</option>
+            </select>
+            <SubmitButton
+              pendingText="Saving..."
+              className="h-8 border border-zinc-200 bg-white px-2 text-xs font-medium disabled:text-zinc-400"
+            >
+              Save
+            </SubmitButton>
+            <span className="text-xs text-zinc-500">
+              Travel times between spots are calculated this way.
+            </span>
+          </form>
+          <div className="mt-3 flex items-center gap-2 border border-zinc-100 bg-zinc-50 p-3 text-xs text-zinc-500">
             <Copy size={14} />
             {`${getSiteUrl()}/share/${bundle.share_token}`}
           </div>
@@ -156,6 +187,14 @@ export default async function TripPage({
               const candidates = stop.spots.filter(
                 (spot) => spot.verification_status === "ai_candidate",
               );
+              const staleHours = verified.filter((spot) => {
+                if (!spot.google_place_id) return false;
+                if (!spot.hours_verified_at) return true;
+                return (
+                  Date.now() - Date.parse(spot.hours_verified_at) >
+                  STALE_HOURS_AFTER_MS
+                );
+              });
               const dayPlans = [...stop.day_plans]
                 .map((plan) => ({
                   ...plan,
@@ -263,6 +302,27 @@ export default async function TripPage({
                       Save stop
                     </SubmitButton>
                   </form>
+
+                  {staleHours.length ? (
+                    <form
+                      action={refreshStopHours}
+                      className="mt-4 flex flex-wrap items-center gap-3 border border-amber-200 bg-amber-50 p-3"
+                    >
+                      <input type="hidden" name="city_stop_id" value={stop.id} />
+                      <input type="hidden" name="trip_id" value={bundle.id} />
+                      <p className="text-xs leading-5 text-amber-900">
+                        {staleHours.length} spot
+                        {staleHours.length === 1 ? "" : "s"} last checked over 30
+                        days ago. Opening hours change seasonally.
+                      </p>
+                      <SubmitButton
+                        pendingText="Refreshing..."
+                        className="h-8 border border-amber-300 bg-white px-3 text-xs font-medium disabled:text-zinc-400"
+                      >
+                        Refresh hours
+                      </SubmitButton>
+                    </form>
+                  ) : null}
 
                   <HotelPicker stop={stop} tripId={bundle.id} />
 

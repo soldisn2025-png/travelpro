@@ -106,6 +106,18 @@ export default async function Home() {
                 <option value="fast_walker">Fast walker</option>
               </select>
             </label>
+            <label className="grid gap-1 text-sm font-medium text-zinc-700">
+              How you get around
+              <select
+                name="travel_mode"
+                className="h-10 border border-zinc-200 px-3 font-normal"
+                defaultValue="transit"
+              >
+                <option value="walk">Mostly walking</option>
+                <option value="transit">Public transit</option>
+                <option value="drive">Driving</option>
+              </select>
+            </label>
             <SubmitButton pendingText="Creating trip..." className="h-10 bg-zinc-950 px-4 text-sm font-medium text-white hover:bg-zinc-800 disabled:bg-zinc-400">
               Create trip
             </SubmitButton>

@@ -11,7 +11,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { CalendarClock, Route, Trash2 } from "lucide-react";
+import { CalendarClock, Clock, Route, Trash2 } from "lucide-react";
 import {
   addAnchor,
   addSpotToDay,
@@ -175,16 +175,17 @@ export function DayPlanner({
     });
   }
 
-  async function runSchedule(dayPlanId: string) {
+  async function runSchedule(dayPlanId: string, mode: "optimize" | "recalculate") {
     setMessage("");
     const response = await fetch("/api/schedule", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ dayPlanId, mode: "optimize" }),
+      body: JSON.stringify({ dayPlanId, mode }),
     });
     const data = await response.json();
     const summary = data.ok
-      ? data.warning || "Day auto-planned."
+      ? data.warning ||
+        (mode === "optimize" ? "Day auto-planned." : "Times recalculated.")
       : data.conflict ?? "Could not schedule day.";
     setMessage([summary, data.travelWarning].filter(Boolean).join(" "));
     router.refresh();
@@ -298,11 +299,26 @@ export function DayPlanner({
                       Save hours
                     </SubmitButton>
                   </form>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
-                      onClick={() => startTransition(() => runSchedule(plan.id))}
+                      onClick={() =>
+                        startTransition(() => runSchedule(plan.id, "recalculate"))
+                      }
                       disabled={isPending}
+                      title="Recalculate times, keeping the order you arranged"
+                      className="inline-flex h-8 items-center gap-2 border border-zinc-200 bg-white px-3 text-xs font-medium disabled:text-zinc-400"
+                    >
+                      <Clock size={14} />
+                      Retime, keep order
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        startTransition(() => runSchedule(plan.id, "optimize"))
+                      }
+                      disabled={isPending}
+                      title="Reorder the day for the shortest travel time"
                       className="inline-flex h-8 items-center gap-2 bg-zinc-950 px-3 text-xs font-medium text-white disabled:bg-zinc-400"
                     >
                       <Route size={14} />

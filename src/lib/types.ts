@@ -1,5 +1,6 @@
 export type TripStatus = "planning" | "confirmed" | "archived";
 export type PlanningMode = "easygoing" | "normal" | "fast_walker";
+export type TravelMode = "walk" | "transit" | "drive";
 export type SpotVerificationStatus = "ai_candidate" | "verified" | "rejected";
 export type DayItemType = "spot" | "fixed_anchor";
 export type ScheduleMode = "auto" | "pinned" | "anchor" | "meal";
@@ -13,6 +14,7 @@ export type Trip = {
   end_date: string;
   status: TripStatus;
   planning_mode: PlanningMode;
+  travel_mode: TravelMode;
   share_token: string;
   created_at: string;
 };
@@ -62,6 +64,7 @@ export type Spot = {
   longitude: number | null;
   opening_hours: Record<string, unknown>;
   source_metadata: Record<string, unknown>;
+  hours_verified_at: string | null;
   verification_status: SpotVerificationStatus;
 };
 
