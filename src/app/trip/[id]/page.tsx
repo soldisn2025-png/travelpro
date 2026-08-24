@@ -19,6 +19,8 @@ import { SetupNotice } from "@/components/setup-notice";
 import { AiSpotGenerator } from "@/components/ai-spot-generator";
 import { DayPlanner } from "@/components/day-planner";
 import { HotelPicker } from "@/components/hotel-picker";
+import { CityMap } from "@/components/city-map";
+import { TripOverview } from "@/components/trip-overview";
 import { PlaceVerifier } from "@/components/place-verifier";
 import { SubmitButton } from "@/components/submit-button";
 import type { DayItem, DayPlan, Spot, TripBundle } from "@/lib/types";
@@ -127,6 +129,8 @@ export default async function TripPage({
             {`${getSiteUrl()}/share/${bundle.share_token}`}
           </div>
         </header>
+
+        <TripOverview bundle={bundle} />
 
         <section className="grid gap-5 lg:grid-cols-[360px_1fr]">
           <aside className="grid content-start gap-5">
@@ -326,6 +330,14 @@ export default async function TripPage({
 
                   <HotelPicker stop={stop} tripId={bundle.id} />
 
+                  <CityMap
+                    cityStopId={stop.id}
+                    city={stop.city}
+                    dayDates={dayPlans.map((plan) => plan.plan_date)}
+                    hasHotel={stop.hotel_latitude !== null}
+                    spotCount={verified.length}
+                  />
+
                   <div className="mt-5 grid gap-4 xl:grid-cols-2">
                     <AiSpotGenerator
                       cityStopId={stop.id}
@@ -419,6 +431,15 @@ export default async function TripPage({
                       <DayPlanner
                         dayPlans={dayPlans}
                         verifiedSpots={unscheduledVerified}
+                        allSpots={stop.spots}
+                        hotel={
+                          stop.hotel_latitude !== null
+                            ? {
+                                latitude: stop.hotel_latitude,
+                                longitude: stop.hotel_longitude,
+                              }
+                            : null
+                        }
                         city={stop.city}
                         arrivalDate={stop.arrival_date}
                         departureDate={stop.departure_date}

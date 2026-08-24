@@ -11,7 +11,7 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { CalendarClock, Clock, Route, Trash2 } from "lucide-react";
+import { CalendarClock, Clock, Navigation, Route, Trash2 } from "lucide-react";
 import {
   addAnchor,
   addSpotToDay,
@@ -23,6 +23,7 @@ import {
   updateDayPlanTimes,
 } from "@/lib/actions";
 import { formatDate, formatTime, timeToMinutes } from "@/lib/dates";
+import { buildDirectionsUrl, dayColor } from "@/lib/map";
 import type { DayItem, DayPlan, Spot } from "@/lib/types";
 import { SubmitButton } from "@/components/submit-button";
 
@@ -167,16 +168,21 @@ function DayDrop({
 export function DayPlanner({
   dayPlans,
   verifiedSpots,
+  allSpots,
+  hotel,
   city,
   arrivalDate,
   departureDate,
 }: {
   dayPlans: Array<DayPlan & { day_items: DayItem[] }>;
   verifiedSpots: Spot[];
+  allSpots: Spot[];
+  hotel: { latitude: number | null; longitude: number | null } | null;
   city: string;
   arrivalDate: string | null;
   departureDate: string | null;
 }) {
+  const spotsById = new Map(allSpots.map((spot) => [spot.id, spot]));
   const sensors = useSensors(useSensor(PointerSensor));
   const [message, setMessage] = useState("");
   const [mealSuggestions, setMealSuggestions] = useState<
@@ -304,6 +310,11 @@ export function DayPlanner({
                 (a.start_time ?? "99:99").localeCompare(b.start_time ?? "99:99") ||
                 a.sort_order - b.sort_order,
             );
+            const dayIndex = dayPlans.findIndex((entry) => entry.id === plan.id);
+            const orderedSpots = sorted
+              .map((item) => (item.spot_id ? spotsById.get(item.spot_id) : undefined))
+              .filter((spot): spot is Spot => Boolean(spot));
+            const directionsUrl = buildDirectionsUrl({ spots: orderedSpots, hotel });
             const firstScheduledItem = sorted.find((item) => item.start_time);
             const dayStart = timeToMinutes(plan.start_time);
             const firstScheduledStart = firstScheduledItem?.start_time
@@ -317,7 +328,12 @@ export function DayPlanner({
               <DayDrop key={plan.id} plan={plan}>
                 <div className="grid gap-2">
                   <div>
-                    <h3 className="text-sm font-semibold text-zinc-950">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
+                      <span
+                        className="inline-block h-3 w-3 shrink-0 rounded-full"
+                        style={{ backgroundColor: dayColor(dayIndex) }}
+                        aria-hidden
+                      />
                       {formatDate(plan.plan_date)}
                     </h3>
                     {plan.plan_date === arrivalDate || plan.plan_date === departureDate ? (
@@ -379,6 +395,18 @@ export function DayPlanner({
                       <Route size={14} />
                       Auto-plan day
                     </button>
+                    {directionsUrl ? (
+                      <a
+                        href={directionsUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Open this day's route in Google Maps"
+                        className="inline-flex h-8 items-center gap-2 border border-zinc-200 bg-white px-3 text-xs font-medium hover:bg-zinc-100"
+                      >
+                        <Navigation size={14} />
+                        Directions
+                      </a>
+                    ) : null}
                   </div>
                 </div>
                 <form
