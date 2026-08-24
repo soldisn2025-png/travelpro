@@ -230,6 +230,112 @@ export async function updateTripTravelMode(formData: FormData) {
   revalidatePath(`/trip/${tripId}`);
 }
 
+const COST_CATEGORIES = [
+  "flight",
+  "lodging",
+  "car",
+  "food",
+  "activity",
+  "other",
+] as const;
+
+export async function addTripCost(formData: FormData) {
+  const { supabase } = await requireUser();
+  const parsed = z
+    .object({
+      trip_id: z.string().uuid(),
+      city_stop_id: z.string().optional(),
+      category: z.enum(COST_CATEGORIES),
+      label: z.string().max(120),
+      amount: z.coerce.number().min(0),
+    })
+    .parse({
+      trip_id: formData.get("trip_id"),
+      city_stop_id: String(formData.get("city_stop_id") ?? ""),
+      category: formData.get("category"),
+      label: String(formData.get("label") ?? ""),
+      amount: formData.get("amount"),
+    });
+
+  const { error } = await supabase.from("trip_costs").insert({
+    trip_id: parsed.trip_id,
+    city_stop_id: parsed.city_stop_id || null,
+    category: parsed.category,
+    label: parsed.label,
+    amount: parsed.amount,
+  });
+
+  if (error) throw new Error(error.message);
+  revalidatePath(`/trip/${parsed.trip_id}`);
+}
+
+export async function deleteTripCost(formData: FormData) {
+  const { supabase } = await requireUser();
+  const costId = z.string().uuid().parse(formData.get("cost_id"));
+  const tripId = z.string().uuid().parse(formData.get("trip_id"));
+
+  const { error } = await supabase.from("trip_costs").delete().eq("id", costId);
+  if (error) throw new Error(error.message);
+  revalidatePath(`/trip/${tripId}`);
+}
+
+export async function updateSpotReference(formData: FormData) {
+  const { supabase } = await requireUser();
+  const spotId = z.string().uuid().parse(formData.get("spot_id"));
+  const tripId = z.string().uuid().parse(formData.get("trip_id"));
+  const url = z.string().max(2000).parse(String(formData.get("reference_url") ?? ""));
+
+  const { error } = await supabase
+    .from("spots")
+    .update({ reference_url: url })
+    .eq("id", spotId);
+
+  if (error) throw new Error(error.message);
+  revalidatePath(`/trip/${tripId}`);
+}
+
+// Swaps a day item with its neighbour, then the caller retimes the day so the
+// new order takes effect. This is the cut-and-paste-a-row move.
+export async function moveDayItem(formData: FormData) {
+  const { supabase } = await requireUser();
+  const dayItemId = z.string().uuid().parse(formData.get("day_item_id"));
+  const direction = z.enum(["up", "down"]).parse(formData.get("direction"));
+
+  const { data: item } = await supabase
+    .from("day_items")
+    .select("id, day_plan_id, sort_order")
+    .eq("id", dayItemId)
+    .single();
+
+  if (!item) return;
+
+  const { data: siblings } = await supabase
+    .from("day_items")
+    .select("id, sort_order")
+    .eq("day_plan_id", item.day_plan_id)
+    .eq("item_type", "spot")
+    .order("sort_order", { ascending: true });
+
+  const ordered = siblings ?? [];
+  const index = ordered.findIndex((entry) => entry.id === dayItemId);
+  const swapWith = direction === "up" ? index - 1 : index + 1;
+
+  if (index === -1 || swapWith < 0 || swapWith >= ordered.length) return;
+
+  // Rewrite the whole sequence so duplicate or missing sort_order values from
+  // older rows cannot make the swap a no-op.
+  const reordered = [...ordered];
+  [reordered[index], reordered[swapWith]] = [reordered[swapWith], reordered[index]];
+
+  await Promise.all(
+    reordered.map((entry, position) =>
+      supabase.from("day_items").update({ sort_order: position }).eq("id", entry.id),
+    ),
+  );
+
+  revalidatePath("/trip");
+}
+
 export async function addCityStop(formData: FormData) {
   const { supabase } = await requireUser();
   const cityStopId = z.string().uuid().parse(formData.get("submission_id"));

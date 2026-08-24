@@ -8,6 +8,7 @@ import {
   createDayPlan,
   deleteSpot,
   refreshStopHours,
+  updateSpotReference,
   updateCityStop,
   updateTravelLeg,
   updateTripTravelMode,
@@ -21,9 +22,11 @@ import { DayPlanner } from "@/components/day-planner";
 import { HotelPicker } from "@/components/hotel-picker";
 import { CityMap } from "@/components/city-map";
 import { TripOverview } from "@/components/trip-overview";
+import { TripCosts } from "@/components/trip-costs";
+import { LegDistance } from "@/components/leg-distance";
 import { PlaceVerifier } from "@/components/place-verifier";
 import { SubmitButton } from "@/components/submit-button";
-import type { DayItem, DayPlan, Spot, TripBundle } from "@/lib/types";
+import type { DayItem, DayPlan, Spot, TripBundle, TripCost } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +47,7 @@ export default async function TripPage({
       `
       *,
       travel_legs(*),
+      trip_costs(*),
       city_stops(
         *,
         spots(*),
@@ -131,6 +135,15 @@ export default async function TripPage({
         </header>
 
         <TripOverview bundle={bundle} />
+
+        <TripCosts
+          tripId={bundle.id}
+          costs={[...((bundle.trip_costs ?? []) as TripCost[])].sort((a, b) =>
+            a.created_at.localeCompare(b.created_at),
+          )}
+          stops={stops}
+          nights={stops.reduce((total, stop) => total + stop.nights, 0)}
+        />
 
         <section className="grid gap-5 lg:grid-cols-[360px_1fr]">
           <aside className="grid content-start gap-5">
@@ -279,9 +292,12 @@ export default async function TripPage({
                           placeholder="Flight number, airport transfer, overnight/time-zone notes"
                           className="min-h-16 border border-sky-200 p-2 text-sm"
                         />
-                        <SubmitButton pendingText="Saving..." className="h-9 justify-self-start bg-white px-3 text-sm font-medium ring-1 ring-sky-200 disabled:text-zinc-400">
-                          Save travel leg
-                        </SubmitButton>
+                        <div className="flex flex-wrap items-center gap-3">
+                          <SubmitButton pendingText="Saving..." className="h-9 bg-white px-3 text-sm font-medium ring-1 ring-sky-200 disabled:text-zinc-400">
+                            Save travel leg
+                          </SubmitButton>
+                          <LegDistance leg={leg} />
+                        </div>
                       </form>
                     );
                   })()}
@@ -402,13 +418,43 @@ export default async function TripPage({
                             key={spot.id}
                             className="flex items-start justify-between gap-3 border border-zinc-100 bg-zinc-50 p-3"
                           >
-                            <div>
+                            <div className="min-w-0 flex-1">
                               <p className="text-sm font-medium text-zinc-950">
                                 {spot.name}
                               </p>
                               <p className="mt-1 text-xs text-zinc-500">
                                 {spot.category} - {spot.duration_minutes} min
                               </p>
+                              {spot.reference_url ? (
+                                <a
+                                  href={spot.reference_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="mt-1 inline-block truncate text-xs text-zinc-600 underline"
+                                >
+                                  Reference link
+                                </a>
+                              ) : null}
+                              <form
+                                action={updateSpotReference}
+                                className="mt-2 flex flex-wrap items-center gap-1"
+                              >
+                                <input type="hidden" name="spot_id" value={spot.id} />
+                                <input type="hidden" name="trip_id" value={bundle.id} />
+                                <input
+                                  name="reference_url"
+                                  type="url"
+                                  defaultValue={spot.reference_url}
+                                  placeholder="Reference link"
+                                  className="h-7 min-w-0 flex-1 border border-zinc-200 bg-white px-2 text-xs"
+                                />
+                                <SubmitButton
+                                  pendingText="..."
+                                  className="h-7 border border-zinc-200 bg-white px-2 text-xs font-medium disabled:text-zinc-400"
+                                >
+                                  Save
+                                </SubmitButton>
+                              </form>
                             </div>
                             <form action={deleteSpot}>
                               <input type="hidden" name="spot_id" value={spot.id} />

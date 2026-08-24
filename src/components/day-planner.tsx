@@ -11,10 +11,11 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { CalendarClock, Clock, Navigation, Route, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarClock, Clock, Navigation, Route, Trash2 } from "lucide-react";
 import {
   addAnchor,
   addSpotToDay,
+  moveDayItem,
   moveDayItemToDay,
   removeDayItem,
   updateDayItemDuration,
@@ -492,6 +493,45 @@ export function DayPlanner({
                             className="mt-2 grid gap-2"
                             onPointerDown={stopDragActivation}
                           >
+                            <div className="flex items-center gap-1">
+                              {(["up", "down"] as const).map((direction) => (
+                                <form
+                                  key={direction}
+                                  action={async (formData) => {
+                                    await moveDayItem(formData);
+                                    // Times follow the order, the way a
+                                    // spreadsheet row moves with its contents.
+                                    await runSchedule(plan.id, "recalculate");
+                                  }}
+                                >
+                                  <input
+                                    type="hidden"
+                                    name="day_item_id"
+                                    value={item.id}
+                                  />
+                                  <input
+                                    type="hidden"
+                                    name="direction"
+                                    value={direction}
+                                  />
+                                  <SubmitButton
+                                    pendingText="..."
+                                    title={
+                                      direction === "up"
+                                        ? "Move earlier in the day"
+                                        : "Move later in the day"
+                                    }
+                                    className="inline-flex h-7 w-7 items-center justify-center border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 disabled:text-zinc-300"
+                                  >
+                                    {direction === "up" ? (
+                                      <ArrowUp size={13} />
+                                    ) : (
+                                      <ArrowDown size={13} />
+                                    )}
+                                  </SubmitButton>
+                                </form>
+                              ))}
+                            </div>
                             <form
                               action={async (formData) => {
                                 await updateDayItemDuration(formData);

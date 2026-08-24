@@ -1,6 +1,13 @@
 export type TripStatus = "planning" | "confirmed" | "archived";
 export type PlanningMode = "easygoing" | "normal" | "fast_walker";
 export type TravelMode = "walk" | "transit" | "drive";
+export type CostCategory =
+  | "flight"
+  | "lodging"
+  | "car"
+  | "food"
+  | "activity"
+  | "other";
 export type SpotVerificationStatus = "ai_candidate" | "verified" | "rejected";
 export type DayItemType = "spot" | "fixed_anchor";
 export type ScheduleMode = "auto" | "pinned" | "anchor" | "meal";
@@ -49,6 +56,19 @@ export type TravelLeg = {
   departure_date: string | null;
   arrival_date: string | null;
   notes: string;
+  duration_minutes: number | null;
+  distance_meters: number | null;
+  route_mode: string | null;
+};
+
+export type TripCost = {
+  id: string;
+  trip_id: string;
+  city_stop_id: string | null;
+  category: CostCategory;
+  label: string;
+  amount: number;
+  created_at: string;
 };
 
 export type Spot = {
@@ -65,6 +85,7 @@ export type Spot = {
   opening_hours: Record<string, unknown>;
   source_metadata: Record<string, unknown>;
   hours_verified_at: string | null;
+  reference_url: string;
   verification_status: SpotVerificationStatus;
 };
 
@@ -95,6 +116,7 @@ export type DayItem = {
 
 export type TripBundle = Trip & {
   travel_legs: TravelLeg[];
+  trip_costs?: TripCost[];
   city_stops: Array<
     CityStop & {
       spots: Spot[];
