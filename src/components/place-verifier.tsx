@@ -6,8 +6,17 @@ import { deleteSpot, verifySpot } from "@/lib/actions";
 import type { PlaceCandidate, Spot } from "@/lib/types";
 import { SubmitButton } from "@/components/submit-button";
 
+function storedAlternates(spot: Spot): PlaceCandidate[] {
+  const alternates = (spot.source_metadata as { alternates?: unknown })?.alternates;
+  return Array.isArray(alternates) ? (alternates as PlaceCandidate[]) : [];
+}
+
 export function PlaceVerifier({ spot, city }: { spot: Spot; city: string }) {
-  const [places, setPlaces] = useState<PlaceCandidate[]>([]);
+  // Generation already fetched the options, so show them straight away rather
+  // than making the user press Search first.
+  const [places, setPlaces] = useState<PlaceCandidate[]>(() =>
+    storedAlternates(spot),
+  );
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -34,6 +43,9 @@ export function PlaceVerifier({ spot, city }: { spot: Spot; city: string }) {
           <p className="mt-1 text-xs text-zinc-500">
             {spot.category} · {spot.duration_minutes} min · {spot.indoor_outdoor}
           </p>
+          <p className="mt-1 text-xs text-amber-700">
+            Google returned more than one likely match. Pick the right one.
+          </p>
         </div>
         <div className="flex gap-2">
           <button
@@ -42,7 +54,7 @@ export function PlaceVerifier({ spot, city }: { spot: Spot; city: string }) {
             className="inline-flex h-8 items-center gap-1 bg-zinc-950 px-2 text-xs font-medium text-white"
           >
             <MapPin size={14} />
-            {isPending ? "Searching..." : "Verify"}
+            {isPending ? "Searching..." : "Search again"}
           </button>
           <form action={deleteSpot}>
             <input type="hidden" name="spot_id" value={spot.id} />

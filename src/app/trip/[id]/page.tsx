@@ -370,7 +370,7 @@ export default async function TripPage({
 
                   {candidates.length ? (
                     <section className="mt-5">
-                      <h3 className="text-sm font-semibold text-zinc-950">Needs Google Places verification</h3>
+                      <h3 className="text-sm font-semibold text-zinc-950">Pick the right place</h3>
                       <div className="mt-3 grid gap-3 lg:grid-cols-2">
                         {candidates.map((spot: Spot) => (
                           <PlaceVerifier key={spot.id} spot={spot} city={stop.city} />

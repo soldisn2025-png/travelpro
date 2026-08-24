@@ -155,7 +155,7 @@ function DayDrop({
   return (
     <div
       ref={setNodeRef}
-      className={`min-h-52 border p-3 ${
+      className={`flex min-h-52 w-[300px] shrink-0 snap-start flex-col border p-3 ${
         isOver ? "border-zinc-950 bg-zinc-100" : "border-zinc-200 bg-white"
       }`}
     >
@@ -270,7 +270,7 @@ export function DayPlanner({
 
   return (
     <DndContext id="day-planner-dnd" sensors={sensors} onDragEnd={handleDragEnd}>
-      <section className="grid gap-4 lg:grid-cols-[220px_1fr]">
+      <section className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
         <aside className="border border-zinc-200 bg-zinc-50 p-3">
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
             Verified spots
@@ -297,6 +297,7 @@ export function DayPlanner({
               {message}
             </p>
           ) : null}
+          <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-3">
           {dayPlans.map((plan) => {
             const sorted = [...plan.day_items].sort(
               (a, b) =>
@@ -314,7 +315,7 @@ export function DayPlanner({
               firstScheduledStart > dayStart;
             return (
               <DayDrop key={plan.id} plan={plan}>
-                <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="grid gap-2">
                   <div>
                     <h3 className="text-sm font-semibold text-zinc-950">
                       {formatDate(plan.plan_date)}
@@ -643,6 +644,7 @@ export function DayPlanner({
               </DayDrop>
             );
           })}
+          </div>
         </div>
       </section>
     </DndContext>

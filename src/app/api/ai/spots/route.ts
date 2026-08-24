@@ -1,8 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { readJson, requireApiUser } from "@/lib/api";
+import { resolveMatch } from "@/lib/matching";
+import { searchPlaces } from "@/lib/places";
 
 const requestSchema = z.object({
+  cityStopId: z.string().uuid(),
   city: z.string().min(2),
   country: z.string().optional(),
   planningMode: z.enum(["easygoing", "normal", "fast_walker"]),
@@ -74,6 +78,113 @@ const fallbackSpots = [
   },
 ];
 
+type Candidate = z.infer<typeof candidateSchema>;
+
+type SpotInsert = {
+  city_stop_id: string;
+  name: string;
+  category: string;
+  duration_minutes: number;
+  indoor_outdoor: string;
+  verification_status: "verified" | "ai_candidate";
+  source_metadata: Record<string, unknown>;
+  google_place_id?: string;
+  address?: string;
+  latitude?: number;
+  longitude?: number;
+  opening_hours?: Record<string, unknown>;
+  hours_verified_at?: string;
+};
+
+// Resolves every AI suggestion against Google Places before the user sees it.
+// Confident matches are saved already verified; only genuine ambiguity is left
+// for a human, with the options already fetched so resolving is one click.
+async function verifyAndSave({
+  supabase,
+  cityStopId,
+  city,
+  candidates,
+}: {
+  supabase: SupabaseClient;
+  cityStopId: string;
+  city: string;
+  candidates: Candidate[];
+}) {
+  const resolved = await Promise.all(
+    candidates.map(async (candidate) => {
+      const search = await searchPlaces(candidate.name, city);
+      if (!search.ok) return { candidate, match: { status: "not_found" } as const };
+      return { candidate, match: resolveMatch(candidate.name, search.places) };
+    }),
+  );
+
+  const now = new Date().toISOString();
+  const rows: SpotInsert[] = resolved.flatMap(({ candidate, match }): SpotInsert[] => {
+    const base = {
+      city_stop_id: cityStopId,
+      name: candidate.name,
+      category: candidate.category,
+      duration_minutes: candidate.duration_minutes,
+      indoor_outdoor: candidate.indoor_outdoor,
+    };
+
+    if (match.status === "verified") {
+      return [
+        {
+          ...base,
+          name: match.place.name,
+          google_place_id: match.place.placeId,
+          address: match.place.address,
+          latitude: match.place.latitude,
+          longitude: match.place.longitude,
+          opening_hours: match.place.openingHours,
+          hours_verified_at: now,
+          verification_status: "verified",
+          source_metadata: {
+            source: "anthropic",
+            rationale: candidate.rationale,
+            auto_verified: true,
+            match_score: match.score,
+            suggested_name: candidate.name,
+          },
+        },
+      ];
+    }
+
+    if (match.status === "ambiguous") {
+      return [
+        {
+          ...base,
+          verification_status: "ai_candidate",
+          source_metadata: {
+            source: "anthropic",
+            rationale: candidate.rationale,
+            auto_verified: false,
+            match_score: match.score,
+            // Stored so the picker can render choices without searching again.
+            alternates: match.alternates,
+          },
+        },
+      ];
+    }
+
+    // Nothing on Google matched, so the name is probably wrong or the place is
+    // gone. Dropping it is better than making the user disprove it.
+    return [];
+  });
+
+  if (rows.length) {
+    const { error } = await supabase.from("spots").insert(rows);
+    if (error) throw new Error(error.message);
+  }
+
+  return {
+    verified: resolved.filter((entry) => entry.match.status === "verified").length,
+    needsReview: resolved.filter((entry) => entry.match.status === "ambiguous").length,
+    dropped: resolved.filter((entry) => entry.match.status === "not_found").length,
+  };
+}
+
 export async function POST(request: Request) {
   const auth = await requireApiUser();
   if (!auth.ok) return auth.response;
@@ -84,12 +195,19 @@ export async function POST(request: Request) {
   const body = parsed.data;
 
   if (!process.env.ANTHROPIC_API_KEY) {
-    return Response.json({
-      spots: fallbackSpots.map((spot) => ({
+    const saved = await verifyAndSave({
+      supabase: auth.supabase,
+      cityStopId: body.cityStopId,
+      city: body.city,
+      candidates: fallbackSpots.map((spot) => ({
         ...spot,
         name: `${body.city} ${spot.name}`,
       })),
-      notice: "ANTHROPIC_API_KEY is missing, so fallback candidates were returned.",
+    });
+
+    return Response.json({
+      ...saved,
+      notice: "ANTHROPIC_API_KEY is missing, so fallback candidates were used.",
     });
   }
 
@@ -131,9 +249,15 @@ Prefer specific places that can be verified in Google Places later. Do not inven
       throw new Error("AI returned no spot ideas. Please try again.");
     }
 
-    const parsed = resultSchema.parse(JSON.parse(text));
+    const generated = resultSchema.parse(JSON.parse(text));
+    const saved = await verifyAndSave({
+      supabase: auth.supabase,
+      cityStopId: body.cityStopId,
+      city: body.city,
+      candidates: generated.spots,
+    });
 
-    return Response.json({ spots: parsed.spots });
+    return Response.json(saved);
   } catch (error) {
     const apiError = error as {
       name?: string;
