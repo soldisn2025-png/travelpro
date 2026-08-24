@@ -30,6 +30,11 @@ export type CityStop = {
   departure_details: string;
   hotel_notes: string;
   flight_notes: string;
+  hotel_name: string;
+  hotel_address: string;
+  hotel_place_id: string | null;
+  hotel_latitude: number | null;
+  hotel_longitude: number | null;
 };
 
 export type TravelLeg = {

@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { randomUUID } from "node:crypto";
 import { notFound } from "next/navigation";
-import { Copy, ExternalLink, Plane, Plus, Trash2 } from "lucide-react";
+import { CalendarArrowDown, Copy, ExternalLink, Plane, Plus, Trash2 } from "lucide-react";
 import {
   addCityStop,
   addManualSpot,
@@ -16,6 +16,7 @@ import { createClient } from "@/lib/supabase/server";
 import { SetupNotice } from "@/components/setup-notice";
 import { AiSpotGenerator } from "@/components/ai-spot-generator";
 import { DayPlanner } from "@/components/day-planner";
+import { HotelPicker } from "@/components/hotel-picker";
 import { PlaceVerifier } from "@/components/place-verifier";
 import { SubmitButton } from "@/components/submit-button";
 import type { DayItem, DayPlan, Spot, TripBundle } from "@/lib/types";
@@ -73,13 +74,22 @@ export default async function TripPage({
                 {bundle.planning_mode.replace("_", " ")}
               </p>
             </div>
-            <Link
-              href={`/share/${bundle.share_token}`}
-              className="inline-flex h-9 items-center gap-2 border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-900 hover:bg-zinc-100"
-            >
-              <ExternalLink size={15} />
-              Share view
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <a
+                href={`/api/calendar/${bundle.share_token}`}
+                className="inline-flex h-9 items-center gap-2 border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-900 hover:bg-zinc-100"
+              >
+                <CalendarArrowDown size={15} />
+                Add to calendar
+              </a>
+              <Link
+                href={`/share/${bundle.share_token}`}
+                className="inline-flex h-9 items-center gap-2 border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-900 hover:bg-zinc-100"
+              >
+                <ExternalLink size={15} />
+                Share view
+              </Link>
+            </div>
           </div>
           <div className="mt-4 flex items-center gap-2 border border-zinc-100 bg-zinc-50 p-3 text-xs text-zinc-500">
             <Copy size={14} />
@@ -253,6 +263,8 @@ export default async function TripPage({
                       Save stop
                     </SubmitButton>
                   </form>
+
+                  <HotelPicker stop={stop} tripId={bundle.id} />
 
                   <div className="mt-5 grid gap-4 xl:grid-cols-2">
                     <AiSpotGenerator

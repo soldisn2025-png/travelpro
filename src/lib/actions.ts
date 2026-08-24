@@ -402,6 +402,46 @@ export async function verifySpot(formData: FormData) {
   revalidatePath("/trip");
 }
 
+export async function setHotel(formData: FormData) {
+  const { supabase } = await requireUser();
+  const cityStopId = z.string().uuid().parse(formData.get("city_stop_id"));
+  const tripId = z.string().uuid().parse(formData.get("trip_id"));
+
+  const { error } = await supabase
+    .from("city_stops")
+    .update({
+      hotel_name: String(formData.get("hotel_name") ?? ""),
+      hotel_address: String(formData.get("hotel_address") ?? ""),
+      hotel_place_id: String(formData.get("hotel_place_id") ?? "") || null,
+      hotel_latitude: Number(formData.get("hotel_latitude")) || null,
+      hotel_longitude: Number(formData.get("hotel_longitude")) || null,
+    })
+    .eq("id", cityStopId);
+
+  if (error) throw new Error(error.message);
+  revalidatePath(`/trip/${tripId}`);
+}
+
+export async function clearHotel(formData: FormData) {
+  const { supabase } = await requireUser();
+  const cityStopId = z.string().uuid().parse(formData.get("city_stop_id"));
+  const tripId = z.string().uuid().parse(formData.get("trip_id"));
+
+  const { error } = await supabase
+    .from("city_stops")
+    .update({
+      hotel_name: "",
+      hotel_address: "",
+      hotel_place_id: null,
+      hotel_latitude: null,
+      hotel_longitude: null,
+    })
+    .eq("id", cityStopId);
+
+  if (error) throw new Error(error.message);
+  revalidatePath(`/trip/${tripId}`);
+}
+
 export async function rejectSpot(formData: FormData) {
   const { supabase } = await requireUser();
   const spotId = z.string().uuid().parse(formData.get("spot_id"));

@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { CalendarDays, Hotel, PlaneTakeoff } from "lucide-react";
+import { CalendarDays, CalendarArrowDown, Hotel, PlaneTakeoff } from "lucide-react";
 import { formatDate, formatTime } from "@/lib/dates";
 import { hasSupabaseEnv } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -53,6 +53,13 @@ export default async function SharePage({
           <p className="mt-2 text-sm text-zinc-500">
             {bundle.start_date} to {bundle.end_date} · read only
           </p>
+          <a
+            href={`/api/calendar/${token}`}
+            className="mt-4 inline-flex h-9 items-center gap-2 border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-900 hover:bg-zinc-100"
+          >
+            <CalendarArrowDown size={15} />
+            Add to calendar
+          </a>
         </header>
 
         <div className="mt-4 grid gap-4">

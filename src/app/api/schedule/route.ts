@@ -68,31 +68,41 @@ function getOpenHours(spot: Spot, planDate: string): OpenHours {
   return { status: "open", windows: windows.sort((a, b) => a.start - b.start) };
 }
 
-function travelBetween(from: DayItem, to: DayItem, matrix: Matrix) {
-  if (!from.spot_id || !to.spot_id) return DEFAULT_TRAVEL_MINUTES;
-  return matrix[`${from.spot_id}:${to.spot_id}`] ?? DEFAULT_TRAVEL_MINUTES;
+function travelFrom(fromNodeId: string | null, to: DayItem, matrix: Matrix) {
+  if (!fromNodeId || !to.spot_id) return DEFAULT_TRAVEL_MINUTES;
+  return matrix[`${fromNodeId}:${to.spot_id}`] ?? DEFAULT_TRAVEL_MINUTES;
 }
 
-function nearestNeighborOrder(spotItems: DayItem[], matrix: Matrix) {
+// Starts from the hotel when one is set, so the first stop of the day is the
+// one nearest where the traveller wakes up rather than an arbitrary pick.
+function nearestNeighborOrder(
+  spotItems: DayItem[],
+  matrix: Matrix,
+  startNodeId: string | null,
+) {
   if (spotItems.length < 3) return spotItems;
 
-  const remaining = spotItems.slice(1);
-  const order = [spotItems[0]];
+  const remaining = [...spotItems];
+  const order: DayItem[] = [];
+  let currentId = startNodeId;
 
   while (remaining.length) {
-    const previous = order[order.length - 1];
     let bestIndex = 0;
-    let bestTravel = Infinity;
 
-    remaining.forEach((candidate, index) => {
-      const travel = travelBetween(previous, candidate, matrix);
-      if (travel < bestTravel) {
-        bestTravel = travel;
-        bestIndex = index;
-      }
-    });
+    if (currentId) {
+      let bestTravel = Infinity;
+      remaining.forEach((candidate, index) => {
+        const travel = travelFrom(currentId, candidate, matrix);
+        if (travel < bestTravel) {
+          bestTravel = travel;
+          bestIndex = index;
+        }
+      });
+    }
 
-    order.push(remaining.splice(bestIndex, 1)[0]);
+    const next = remaining.splice(bestIndex, 1)[0];
+    order.push(next);
+    currentId = next.spot_id;
   }
 
   return order;
@@ -114,11 +124,17 @@ function chunk<T>(items: T[], size: number) {
   return chunks;
 }
 
-function toWaypoint(spot: Spot) {
+// The hotel joins the travel matrix as an ordinary node so the walk from bed to
+// first stop is costed like any other leg.
+const HOTEL_NODE_ID = "hotel";
+
+type MatrixNode = { id: string; latitude: number | null; longitude: number | null };
+
+function toWaypoint(node: MatrixNode) {
   return {
     waypoint: {
       location: {
-        latLng: { latitude: spot.latitude, longitude: spot.longitude },
+        latLng: { latitude: node.latitude, longitude: node.longitude },
       },
     },
   };
@@ -127,9 +143,9 @@ function toWaypoint(spot: Spot) {
 // plan_date and start_time are local to the destination city, but the Routes
 // API wants an absolute UTC instant. Without the city's offset a 09:00 local
 // departure can land in the middle of the night and return no transit at all.
-async function getUtcOffsetSeconds(spot: Spot, planDate: string, key: string) {
+async function getUtcOffsetSeconds(node: MatrixNode, planDate: string, key: string) {
   const timestamp = Math.floor(Date.parse(`${planDate}T12:00:00Z`) / 1000);
-  const url = `https://maps.googleapis.com/maps/api/timezone/json?location=${spot.latitude},${spot.longitude}&timestamp=${timestamp}&key=${key}`;
+  const url = `https://maps.googleapis.com/maps/api/timezone/json?location=${node.latitude},${node.longitude}&timestamp=${timestamp}&key=${key}`;
 
   try {
     const response = await fetch(url);
@@ -159,10 +175,10 @@ function toDepartureTime(planDate: string, startTime: string, offsetSeconds: num
   return new Date(utcMs).toISOString();
 }
 
-async function getTravelMatrix(spots: Spot[], plan: DayPlan) {
+async function getTravelMatrix(nodes: MatrixNode[], plan: DayPlan) {
   const key = process.env.GOOGLE_MAPS_API_KEY;
-  const usable = spots.filter(
-    (spot) => spot.latitude !== null && spot.longitude !== null,
+  const usable = nodes.filter(
+    (node) => node.latitude !== null && node.longitude !== null,
   );
 
   if (!key) return { matrix: {} as Matrix, error: "GOOGLE_MAPS_API_KEY is missing." };
@@ -316,6 +332,7 @@ function scheduleAutoOrder({
   fixedItems,
   spots,
   matrix,
+  startNodeId,
 }: {
   plan: DayPlan;
   spotItems: DayItem[];
@@ -323,6 +340,7 @@ function scheduleAutoOrder({
   fixedItems: DayItem[];
   spots: Record<string, Spot>;
   matrix: Matrix;
+  startNodeId: string | null;
 }) {
   const start = timeToMinutes(plan.start_time);
   const end = timeToMinutes(plan.end_time);
@@ -332,7 +350,8 @@ function scheduleAutoOrder({
     .sort((a, b) => a.start - b.start);
 
   let cursor = start;
-  let previousSpotId: string | null = null;
+  // Day one leg is hotel to first stop when a hotel is set.
+  let previousSpotId: string | null = startNodeId;
   let totalTravel = 0;
   const pendingMeals = [...mealItems].sort((a, b) => {
     const aWindow = getMealWindow(a);
@@ -511,6 +530,7 @@ function chooseOptimizedOrder({
   fixedItems,
   spots,
   matrix,
+  startNodeId,
 }: {
   plan: DayPlan;
   spotItems: DayItem[];
@@ -518,14 +538,23 @@ function chooseOptimizedOrder({
   fixedItems: DayItem[];
   spots: Record<string, Spot>;
   matrix: Matrix;
+  startNodeId: string | null;
 }) {
   const evaluate = (order: DayItem[]) =>
-    scheduleAutoOrder({ plan, spotItems: order, mealItems, fixedItems, spots, matrix });
+    scheduleAutoOrder({
+      plan,
+      spotItems: order,
+      mealItems,
+      fixedItems,
+      spots,
+      matrix,
+      startNodeId,
+    });
 
   // Seed with a nearest-neighbour route, then improve it with 2-opt segment
   // reversals. Bounded work, unlike enumerating every permutation.
   let evaluations = 1;
-  let bestOrder = nearestNeighborOrder(spotItems, matrix);
+  let bestOrder = nearestNeighborOrder(spotItems, matrix, startNodeId);
   let best = evaluate(bestOrder);
   let bestFailure = best.ok ? null : best;
 
@@ -574,6 +603,72 @@ function chooseOptimizedOrder({
   );
 }
 
+// Dropped in this order when the day will not fit. "must" is never dropped.
+const DROPPABLE_PRIORITIES = ["maybe", "nice"] as const;
+
+// A single closed or oversized spot used to fail the whole day. Instead, retry
+// without the lowest-priority spots until something fits, and report what was
+// left out rather than returning nothing.
+function scheduleWithDegradation({
+  plan,
+  spotItems,
+  mealItems,
+  fixedItems,
+  spots,
+  matrix,
+  mode,
+  startNodeId,
+}: {
+  plan: DayPlan;
+  spotItems: DayItem[];
+  mealItems: DayItem[];
+  fixedItems: DayItem[];
+  spots: Record<string, Spot>;
+  matrix: Matrix;
+  mode: "recalculate" | "optimize";
+  startNodeId: string | null;
+}) {
+  const run = (candidates: DayItem[]) =>
+    mode === "optimize"
+      ? chooseOptimizedOrder({
+          plan,
+          spotItems: candidates,
+          mealItems,
+          fixedItems,
+          spots,
+          matrix,
+          startNodeId,
+        })
+      : scheduleAutoOrder({
+          plan,
+          spotItems: candidates,
+          mealItems,
+          fixedItems,
+          spots,
+          matrix,
+          startNodeId,
+        });
+
+  let candidates = spotItems;
+  const dropped: DayItem[] = [];
+  let result = run(candidates);
+  // Keep the reason the full day failed; it explains the drops that follow.
+  const firstConflict = result.ok ? null : result.conflict;
+
+  for (const tier of DROPPABLE_PRIORITIES) {
+    if (result.ok) break;
+
+    const droppable = candidates.filter((item) => (item.priority ?? "nice") === tier);
+    if (!droppable.length) continue;
+
+    candidates = candidates.filter((item) => (item.priority ?? "nice") !== tier);
+    dropped.push(...droppable);
+    result = run(candidates);
+  }
+
+  return { result, dropped, firstConflict };
+}
+
 export async function POST(request: Request) {
   const auth = await requireApiUser();
   if (!auth.ok) return auth.response;
@@ -615,8 +710,26 @@ export async function POST(request: Request) {
     return acc;
   }, {});
   const allItems = items as DayItem[];
+
+  // The hotel anchors the first leg of the day, so it joins the travel matrix.
+  const { data: cityStop } = await supabase
+    .from("city_stops")
+    .select("hotel_name, hotel_latitude, hotel_longitude")
+    .eq("id", (plan as DayPlan).city_stop_id)
+    .single();
+
+  const hotel =
+    cityStop?.hotel_latitude !== null && cityStop?.hotel_latitude !== undefined
+      ? {
+          id: HOTEL_NODE_ID,
+          latitude: cityStop.hotel_latitude as number,
+          longitude: cityStop.hotel_longitude as number,
+          name: String(cityStop.hotel_name ?? "your hotel"),
+        }
+      : null;
+
   const { matrix, error: matrixError } = await getTravelMatrix(
-    Object.values(spots),
+    hotel ? [...Object.values(spots), hotel] : Object.values(spots),
     plan as DayPlan,
   );
   const fixedItems = allItems.filter(
@@ -628,23 +741,16 @@ export async function POST(request: Request) {
     .filter((item) => item.item_type === "spot" && item.schedule_mode !== "pinned")
     .sort((a, b) => a.sort_order - b.sort_order);
   const mealItems = allItems.filter(isMealPlaceholder);
-  const result = mode === "optimize"
-    ? chooseOptimizedOrder({
-        plan: plan as DayPlan,
-        spotItems,
-        mealItems,
-        fixedItems,
-        spots,
-        matrix,
-      })
-    : scheduleAutoOrder({
-        plan: plan as DayPlan,
-        spotItems,
-        mealItems,
-        fixedItems,
-        spots,
-        matrix,
-      });
+  const { result, dropped, firstConflict } = scheduleWithDegradation({
+    plan: plan as DayPlan,
+    spotItems,
+    mealItems,
+    fixedItems,
+    spots,
+    matrix,
+    mode,
+    startNodeId: hotel ? HOTEL_NODE_ID : null,
+  });
 
   if (!result.ok) {
     await supabase
@@ -660,7 +766,9 @@ export async function POST(request: Request) {
     revalidatePath("/trip");
     return Response.json({
       ok: false,
-      conflict: result.conflict,
+      // firstConflict is the original blocker; result.conflict comes from the
+      // most degraded attempt and is usually less useful.
+      conflict: firstConflict ?? result.conflict,
       travelWarning: matrixError,
     });
   }
@@ -686,12 +794,50 @@ export async function POST(request: Request) {
     ),
   );
 
+  // Dropped items stay on the day, unscheduled, with the reason attached so
+  // they can be re-prioritised or moved rather than quietly disappearing.
+  await Promise.all(
+    dropped.map((item) =>
+      supabase
+        .from("day_items")
+        .update({
+          start_time: null,
+          end_time: null,
+          travel_time_from_previous_minutes: null,
+          travel_time_is_estimated: false,
+          conflict_reason: `Left out to make the day fit (priority: ${item.priority ?? "nice"}).${firstConflict ? ` ${firstConflict}` : ""}`,
+        })
+        .eq("id", item.id),
+    ),
+  );
+
   const dayStart = timeToMinutes((plan as DayPlan).start_time);
   const firstStart = result.items[0]?.nextStart;
-  const warning =
+  const bufferWarning =
     firstStart && firstStart > dayStart
       ? `First auto item starts at ${minutesToTime(firstStart).slice(0, 5)} because earlier time is blocked by opening hours or fixed items.`
       : null;
+
+  const droppedWarning = dropped.length
+    ? `Scheduled ${spotItems.length - dropped.length} of ${spotItems.length} spots. Left out: ${dropped
+        .map((item) => item.title)
+        .join(", ")}.${firstConflict ? ` ${firstConflict}` : ""}`
+    : null;
+
+  // The walk back is not scheduled as an item, but it decides whether the last
+  // stop actually fits before the day ends.
+  const lastItem = result.items[result.items.length - 1];
+  const returnMinutes =
+    hotel && lastItem?.spot_id
+      ? matrix[`${lastItem.spot_id}:${HOTEL_NODE_ID}`]
+      : undefined;
+  const returnWarning =
+    returnMinutes === undefined
+      ? null
+      : `Back to ${hotel?.name} about ${returnMinutes} min after the last stop (${minutesToTime(lastItem.nextEnd + returnMinutes).slice(0, 5)}).`;
+
+  const warning =
+    [droppedWarning, bufferWarning, returnWarning].filter(Boolean).join(" ") || null;
 
   const estimatedCount = result.items.filter((item) => item.travelEstimated).length;
   const travelWarning =
