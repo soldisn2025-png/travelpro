@@ -662,6 +662,13 @@ export async function updateDayPlanTimes(formData: FormData) {
     })
     .parse(Object.fromEntries(formData));
 
+  const startMinutes = timeToMinutes(parsed.start_time);
+  const endMinutes = timeToMinutes(parsed.end_time);
+
+  if (endMinutes <= startMinutes) {
+    throw new Error("The day has to end after it starts.");
+  }
+
   const { error } = await supabase
     .from("day_plans")
     .update({
@@ -674,6 +681,18 @@ export async function updateDayPlanTimes(formData: FormData) {
     })
     .eq("id", parsed.day_plan_id);
 
+  if (error) throw new Error(error.message);
+  revalidatePath("/trip");
+}
+
+// Stay dates are generated inclusively, so an overnight flight can produce a
+// day the traveller is not actually there for.
+export async function deleteDayPlan(formData: FormData) {
+  const { supabase } = await requireUser();
+  const dayPlanId = z.string().uuid().parse(formData.get("day_plan_id"));
+
+  // day_items cascade on the foreign key.
+  const { error } = await supabase.from("day_plans").delete().eq("id", dayPlanId);
   if (error) throw new Error(error.message);
   revalidatePath("/trip");
 }

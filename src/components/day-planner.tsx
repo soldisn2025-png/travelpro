@@ -11,10 +11,11 @@ import {
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import { ArrowDown, ArrowUp, CalendarClock, Clock, Navigation, Route, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, CalendarClock, Clock, Navigation, Route, Trash2, X } from "lucide-react";
 import {
   addAnchor,
   addSpotToDay,
+  deleteDayPlan,
   moveDayItem,
   moveDayItemToDay,
   removeDayItem,
@@ -304,7 +305,7 @@ export function DayPlanner({
               {message}
             </p>
           ) : null}
-          <div className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-3">
+          <div className="flex snap-x snap-mandatory items-start gap-3 overflow-x-auto pb-3">
           {dayPlans.map((plan) => {
             const sorted = [...plan.day_items].sort(
               (a, b) =>
@@ -328,7 +329,8 @@ export function DayPlanner({
             return (
               <DayDrop key={plan.id} plan={plan}>
                 <div className="grid gap-2">
-                  <div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
                     <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-950">
                       <span
                         className="inline-block h-3 w-3 shrink-0 rounded-full"
@@ -346,6 +348,17 @@ export function DayPlanner({
                         {plan.plan_date === departureDate ? "Departure day" : ""}
                       </p>
                     ) : null}
+                    </div>
+                    <form action={deleteDayPlan}>
+                      <input type="hidden" name="day_plan_id" value={plan.id} />
+                      <SubmitButton
+                        pendingText="..."
+                        title="Remove this day from the trip"
+                        className="inline-flex h-7 w-7 shrink-0 items-center justify-center border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-100 disabled:text-zinc-300"
+                      >
+                        <X size={14} />
+                      </SubmitButton>
+                    </form>
                   </div>
                   <form
                     action={updateDayPlanTimes}
@@ -356,6 +369,7 @@ export function DayPlanner({
                       name="start_time"
                       type="time"
                       defaultValue={plan.start_time.slice(0, 5)}
+                      onChange={(event) => event.currentTarget.form?.requestSubmit()}
                       className="h-8 border border-zinc-200 px-2 text-xs"
                       title="Day start time"
                     />
@@ -364,6 +378,7 @@ export function DayPlanner({
                       name="end_time"
                       type="time"
                       defaultValue={plan.end_time.slice(0, 5)}
+                      onChange={(event) => event.currentTarget.form?.requestSubmit()}
                       className="h-8 border border-zinc-200 px-2 text-xs"
                       title="Day end time"
                     />
